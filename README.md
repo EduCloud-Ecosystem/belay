@@ -4,7 +4,7 @@
 
 <h1 align="center">Belay</h1>
 
-<p align="center"><strong>An AI peer tutor that helps learners think, while a deterministic governance gate guards against revealing solutions.</strong></p>
+<p align="center"><strong>A self-hosted peer tutor for learning to program.</strong></p>
 
 <p align="center">
   <img src="assets/readme/badge-python.svg" alt="Python">
@@ -13,302 +13,220 @@
   <img src="assets/readme/badge-css.svg" alt="CSS">
 </p>
 
-<p align="center"><a href="#quickstart">Get started</a> · <a href="#what-it-is">How it works</a> · <a href="docs/authentication.md">Authentication</a> · <a href="ARCHITECTURE.md">Architecture</a></p>
-
-> **Built for learning, with a safety boundary.** Belay evaluates a tutor's draft against the active domain's executable checks before delivering it. The illustration above is conceptual, not a product screenshot.
+<p align="center"><a href="#quickstart">Run Belay</a> · <a href="#how-sol-builds-a-reply">How the tutor works</a> · <a href="#adding-a-domain-pack">Add a domain pack</a> · <a href="#development-and-evaluation">Development and evaluation</a></p>
 
 ## What it is
 
-The tutor runs an evaluation-first loop per turn: a Planner picks one pedagogical
-move, a Peer-Reasoner writes the message, a Self-Evaluation critiques it against a
-stance rubric, a bounded refine fixes a failing draft, a deterministic Governance gate
-runs last, and Memory merges what the student now grasps. The reference domain is
-general data science (the "Robin" pack). This framework is original; its first
-implementation was built within a quantum tutor, and the domain-agnostic core was
-extracted from that codebase. The quantum-specific application stays in its own
-repository and is not part of this framework.
+Belay pairs a code editor and an exercise grader with a conversational tutor
+called Sol. A learner can try a solution, inspect the result, and ask a question
+about the code they just ran. A course author supplies the exercises, grading
+rules and reference material. Belay supplies the tutoring loop, the code runner
+and the checks that decide what feedback reaches the learner.
 
-Three properties distinguish it:
-
-- Deterministic governance. The no-leak rule is an executable gate, not a prompt
-  instruction. Leak-detection has a ground-truth oracle (the pack's grader plus the
-  known solution), so the gate decides post-hoc and is supreme over everything,
-  including a student goal that demands the answer.
-- Privacy by architecture. Identity is a pseudonymous host id only (for example
-  `gh:12345`); PII is rejected at the sidecar boundary; there is no write path to
-  grades and no rankings. Goals and reflections are pseudonymous and never surfaced to
-  an instructor.
-- Compute-agnostic, self-hosted first. The default provider is `openai_compatible`
-  pointed at a local Ollama or vLLM endpoint, so the tutor can run entirely on
-  institutional compute with no external API in the data path.
-
-## Authentication required
-
-All learner/resource API routes now require a short-lived signed bearer plus
-operator-owned institution/class/learner and assignment-version grants. The
-production default refuses protected requests with missing configuration (503).
-Local/test modes must be explicitly selected and also require credentials.
-Set up the [identity contract and authorization file](docs/authentication.md)
-before following the quickstart. Health checks remain public.
+The reference data-science pack has three runnable exercises. **Grouped
+summaries** asks learners to compute a mean for each category in a sales file.
+**Held-out regression** asks them to fit on the training split and predict on
+unseen data. The third exercise trains a small neural network in NumPy.
+Each gives Sol something concrete to discuss, such as a program that runs
+successfully but misses an exercise check.
 
 ## Quickstart
 
-### Controlled Run code / Ask Sol (PowerShell)
+### Run the local tutor
 
-Open PowerShell in this repository's root with your Python environment activated.
-For **first use only**, copy and run this entire block. It prepares a new local
-model-stub installation; it refuses existing config/data rather than overwriting
-them. It does not start services or call a real model.
+Use PowerShell from the repository root with Python 3.12 and Docker running.
+For a **new installation**, create and activate a Python environment, install
+the backend and data-science pack, then build the isolated code runner:
 
 ```powershell
-& {
-    $ErrorActionPreference = 'Stop'
-    $belayRoot = (Get-Location).Path
-    if (-not (Test-Path './backend/app/controlled_runtime.py')) { throw 'Run from the Belay repository root.' }
-    $configDir = Join-Path $belayRoot 'deployment/local/controlled-config'
-    $dataDir = Join-Path $belayRoot 'deployment/local/controlled-runtime'
-    if ((Test-Path $configDir) -or (Test-Path $dataDir)) { throw 'Already configured or partially prepared; retain existing files and inspect them before proceeding.' }
-    python -m pip install -r ./backend/requirements.txt -r ./backend/requirements-packs.txt
-    if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
-    New-Item -ItemType Directory -Path $configDir | Out-Null
-    Copy-Item ./deployment/controls/controlled-runtime.env.example (Join-Path $configDir '.env')
-    Copy-Item ./deployment/controls/controlled-runtime-policy.example.json (Join-Path $configDir 'policy.json')
-    Push-Location ./backend
-    try {
-        python -m app.controlled_runtime prepare --data-dir $dataDir --env-file (Join-Path $configDir '.env') --policy (Join-Path $configDir 'policy.json') --api-port 8004 --frontend-port 5177
-        if ($LASTEXITCODE -ne 0) { throw 'Preparation failed; do not reinitialize existing data.' }
-    } finally { Pop-Location }
-}
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r backend/requirements.txt -r backend/requirements-packs.txt
+docker build -t belay-sandbox:0.1.0 -f backend/Dockerfile.sandbox backend
+.\deployment\controls\prepare-local-stub.ps1
 ```
 
-**Daily commands** for an already prepared installation, from the repository root:
+The last command prepares a local database, test identity and model stub.
+It runs once and refuses to overwrite existing configuration or data.
+For an **already prepared installation**, activate its Python environment and
+start here:
 
 ```powershell
 .\start-belay.ps1 -Check
 .\start-belay.ps1
 ```
 
-Defaults read `deployment/local/controlled-config/.env` and, if present,
-credentials only from `backend/.env`. The selected provider/models come from
-configuration; an existing profile may use paid inference. Only missing keys
-prompt securely. Check makes no model calls and reports queued work and expiry.
-After successful start,
-open **http://127.0.0.1:5177/dev-client.html**; API: **http://127.0.0.1:8004**.
-The command runs API, frontend and worker together in the foreground. Default
-feedback in a fresh example installation is labelled `Local model stub`; existing
-configurations are retained. Wait for `ready:true` and `worker_alive:true`;
-`checked:true` alone is preflight. Eligible queued work can execute on start;
-unknown tasks are not automatically resubmitted.
+The first command reports the selected provider and any queued work. The second
+starts the API, learner page and worker. Once the launcher reports `ready` and
+`worker_alive` as true, open the [learner page](http://127.0.0.1:5177/dev-client.html).
+You can also check [API health](http://127.0.0.1:8004/healthz).
 
-**Stop:** press **Ctrl+C** in the starting terminal, or run this from a second
-PowerShell at the repository root:
+1. Select **01 · Grouped summaries** and click **Run code**. Read the program
+   output and exercise checks, then the tutor feedback. The fresh installation
+   labels its sample replies **Local model stub** and runs learner code in Docker.
+2. Use **Ask Sol** to ask a follow-up. Expand **Glass Box · Latest response** to
+   see which evidence the tutor used and why it chose that kind of help.
+3. Try another edit and run it again. If you want to revisit a conversation,
+   enable optional saving for the exercise.
+
+Stop with **Ctrl+C** in the launch terminal, or run this from a second PowerShell
+in the repository root:
 
 ```powershell
 .\stop-belay.ps1
 ```
 
-Wait for the starting terminal to exit. Start does not initialize/migrate/reset
-data; stop does not erase task records or refund unknown usage.
-Start never renews a persisted authorization. An approved, unarmed window starts
-once on first launch. An expired window requires explicit review, not another
-prepare. Optional `-DataDir`, `-EnvFile`, `-CredentialsEnvFile` select another
-prepared installation. Model changes also need reviewed prices and budget policy,
-not just a new key. See the team README below for precedence and troubleshooting.
+The [local setup guide](deployment/controls/README.md) covers existing
+installations, custom paths, queued work and startup errors.
 
-The inference time window is an operator-selected **local testing policy**,
-independent of API credential lifetime, student budget limits and saved-dialogue
-retention. Two hours was a temporary validation choice, not a model-provider or
-formal-course requirement. For continuous local development, a **cumulative
-amount-only budget** needs no short expiry or renewal. To explicitly convert an
-existing finite authorization, stop its host and run once from the repository root:
+### Preview the interface without a backend
 
-```powershell
-.\start-belay.ps1 -UseAmountOnlyBudget
-.\start-belay.ps1 -Check
+For a walkthrough with simulated code output and tutor replies, run these
+commands from the repository root with Node.js and Python 3:
+
+```sh
+node frontend/tests/build-feedback-fixture.cjs
+python -m http.server 5173 --bind 127.0.0.1 --directory frontend
 ```
 
-The conversion archives the old deadline, pins the **same cumulative ceiling**,
-and leaves the database, consumed money and unknown reservations unchanged. It
-does not start services, grant money or change prices. Active/queued work and
-pending authorizations require review before conversion. Unknown tasks remain
-unreplayed. The normal `./start-belay.ps1` and `./stop-belay.ps1` commands then
-remain unchanged. An exhausted amount budget still blocks inference.
+Open the [offline preview](http://127.0.0.1:5173/tests/fixtures/generated-feedback-preview.html)
+and select an exercise. Press Ctrl+C in the terminal to stop the preview server.
 
-For a new amount-only profile, configure `CONTROLS_INFERENCE_WINDOW_SECONDS=0`,
-`CONTROLS_INFERENCE_EXPIRES_AT=0` and an explicitly approved finite
-`CONTROLS_INFERENCE_TOTAL_MICROUNITS`, prepare **only that new installation**, then
-use the same conversion command to persist the ceiling. One USD is 1,000,000
-microunits. Existing installations take the ceiling from their saved authorization,
-not a larger env value. The per-scope policy limits continue to apply as well.
-Bounded profiles still support fixed windows up to 7200 seconds, persisted on
-first start and never renewed by restart. See the [team README](deployment/controls/README.md)
-for configuration precedence and mode-change constraints.
+## How Sol builds a reply
 
-**Developer budget versus teaching quota:** local amount-only testing uses an
-explicit finite cumulative budget with no short renewal deadline. It is not a
-student allowance. Raising it requires approval of the additional money and
-associated resource limits; changing only the key or scoped policy cannot raise
-the manifest's pinned ceiling. The [local budget proposal and future course
-quota requirements](deployment/controls/budget-policy.md) record
-the current audit and pending recommendation, not active new settings.
-Formal teaching is a separate future requirement: configurable learner quota
-periods during valid course access, with spending still accumulated against the
-class/course total and all ledger history retained. That policy and its ownership
-are to be agreed with Greg; no new periodic quota or admin UI is implemented.
+The **planner** chooses a teaching move based on the learner’s question, the
+exercise and available run results. For a failed check, it might ask the learner
+to inspect one category of data. The **reasoner** drafts the reply. A
+**self-evaluator** checks whether it fits the assigned teaching stance, and a
+bounded revision step can try again. Belay updates its learner model as the
+conversation progresses. The [agent implementation](backend/app/agent/) and
+[architecture guide](ARCHITECTURE.md) describe the stages.
 
-For the newer **local short-period + weekly** proposal, see the
-[current budget plan and verification summary](deployment/controls/budget-policy.md).
-The optional coordinator checks both fixed windows plus existing scope/cumulative
-limits. A quota refresh does not add funds or erase historical/unknown usage.
-Local budget changes require explicit authorization. A **new explicit local approval
-on 2026-10-11 has now been applied**: USD5 additional funding, cumulative ceiling
-USD5.148223 without expiry, USD1 per six hours and USD5 per week. These are that
-local installation's approved values, not repository/provider/student defaults.
+Two checks matter when Sol helps with a graded exercise:
 
-Its fixed timezone is **Asia/Shanghai (UTC+08:00)**: six-hour buckets begin at
-00:00/06:00/12:00/18:00; weeks begin Monday 00:00. Short refresh never resets week
-usage; week refresh never resets cumulative usage or grants new money. Restart
-does not change these boundaries. Both windows and all other budget controls
-must pass. Other resource caps remain unchanged. See the
-[applied authorization and verification summary](deployment/controls/budget-policy.md)
-for preserved ledger evidence and the manual restart commands. Formal
-student/course quota rules remain separate and unimplemented.
+- **Giving a hint without giving away the solution.** The domain pack supplies
+  evidence about whether a draft solves the exercise. A final governance check
+  can withhold or rewrite a reply. Retrieved passages are also screened before
+  they reach the model. An optional input classifier can flag attempts to
+  override the tutor’s instructions.
+- **Showing where an explanation came from.** The data-science pack searches
+  a local collection of teaching notes. When the grounding check matches a
+  claim to a passage, it places a citation beside that claim. The corpus records
+  the source and license for each passage. See the [knowledge base](backend/app/packs/datascience/knowledge/)
+  and [grounding checks](docs/reviews/pr5-grounding.md).
 
-The deployment allowance is **shared across providers, models and tiers** in
-the same controlled installation. Planning, generation, evaluation, revision,
-format fallback and JSON repair each reserve and settle through `model_call`.
-Changing `PROVIDER` or model names does not create another quota or reset history.
-Keep the same database, deployment ID and approved cumulative cap on all workers.
-The policy uses one conservative input/output price bound covering every selected
-model; it is not an automatic vendor price catalogue. Review these bounds when
-switching models. `LLM_BILLING_MODE=metered` rejects zero/missing prices before
-dispatch; free/self-hosted inference requires explicit `unmetered` configuration
-and still obeys token/resource limits. Missing usage retains a reservation.
-See the [shared-provider audit](deployment/controls/shared-provider-budget-audit-summary.md)
-for simulated-adapter coverage and remaining verification limits.
+## Code execution, conversations and access
 
-For the integrated **controlled Run code / Ask Sol / optional save and recovery**
-page, start with the [team setup and launch README](deployment/controls/README.md)
-(first-time preparation, daily start/stop and code entry map). The
-[controlled runtime guide](deployment/controls/controlled-runtime.md) documents
-provider configuration, migrations and operational boundaries.
-Its tracked `app.controlled_runtime` entry separates prepare/migrate from start,
-assembles identity/shared R2-R3 database/policy/worker/cleanup, and selects an
-implemented provider from backend environment. The default example is a local
-model stub. The older container/source quickstart below does not itself provision
-these controlled-job prerequisites.
+**Code execution.** The runner executes learner Python in a container with
+network access disabled and limits on CPU, wall time and output. The grader
+stays on the host, where it can use the reference solution without putting it
+in the learner’s container. The interface shows execution errors and exercise
+checks separately, so a learner can see whether the program failed to run or
+produced a result that missed the goal. See the [runner](backend/app/core/runner/)
+and [grading specifications](backend/app/packs/datascience/specs/).
 
-The fastest path is the container, which is SQLite-default and points at a local
-OpenAI-compatible model endpoint with no external API.
+**Saved conversations.** Learners can use Sol with saving off. When the
+installation permits saving and the learner opts in, they can reopen a saved
+conversation for the same exercise. Belay checks the learner, class, assignment
+and content version before returning it. Research consent is a separate choice.
+If a queued request is interrupted, the client can check its status without
+automatically sending it to the model a second time. See [conversation storage
+and recovery](docs/conversations.md).
 
-```bash
-docker compose up --build                    # SQLite + openai_compatible
-docker compose --profile postgres up --build # Postgres opt-in (scale)
-```
-
-The container CMD runs the preflight doctor informationally and then serves on port
-8000. To run the doctor directly:
-
-```bash
-cd backend && python -m app.preflight                 # checks config, store, provider
-cd backend && python -m app.preflight --skip-provider # skip the endpoint probe
-```
-
-Preflight prints `[PASS] <check>` / `[FAIL] <check>` for `config`, `store`, and
-(unless skipped) `provider`, then `preflight: OK` or `preflight: FAILED` with a
-non-zero exit on failure.
-
-To run the suite and the local server from source, see `VALIDATION.md` (the canonical
-runbook); env knobs are defined in `backend/app/config.py`. The operationally relevant
-ones:
-
-| Env var | Default | Purpose |
-|---|---|---|
-| `PROVIDER` | `openai_compatible` | Inference provider; also recorded in the trace |
-| `OPENAI_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint (Ollama/vLLM) |
-| `OPENAI_API_KEY` | `EMPTY` | Key for the endpoint (local endpoints ignore it) |
-| `MODEL_FAST` | `llama3.2` | Concrete model for the fast tier |
-| `MODEL_STRONG` | `llama3.2` | Concrete model for the strong tier |
-| `OPENAI_REASONING` | `0` | Send `reasoning_effort` (strong tier) only if on |
-| `TUTOR_PACK` | `datascience` | Active domain pack |
-| `STORE_BACKEND` | `sql` | `sql` (durable) or `memory` (ephemeral) |
-| `DATABASE_URL` | `sqlite:///./qimvp.db` | Store DSN; a Postgres DSN opts into Postgres |
-| `MAX_REFINE` | `1` | Reasoner revisions after a failing self-eval |
-| `TAU_ESCALATE` / `MAX_ESCALATE` | `0.55` / `1` | Re-run at higher effort when under-confident |
-| `TAU_ABSTAIN` | `0.35` | Peer-only honest abstention floor |
-
-## Adding a domain pack
-
-A pack implements the `DomainPack` protocol (`backend/app/core/domain/pack.py`):
-`curriculum`, `get_exercise`, `run`, `program_signature`, `verify_worked_example`,
-`misconceptions`, `leak_evidence`, and optional `knowledge`. Start from
-`backend/app/packs/_skeleton/` (a dependency-free echo pack used for core-only tests)
-and model a real one on `backend/app/packs/datascience/` (the reference pack: a
-taxonomy, a curriculum, declarative grading specs, a misconception library, and
-combined leak evidence). Register the pack's factory in
-`backend/app/core/domain/registry.py` and select it with `TUTOR_PACK`. Core never
-imports a pack at module load; the dependency arrow points from packs to core.
-
-A pack's optional `knowledge()` is backed by the domain-reusable corpus pipeline
-(`backend/app/knowledge/`): a license-gated ingestion step produces a normalized,
-pack-scoped corpus (only public-domain / CC0 / CC-BY / MIT / Apache-2.0 / BSD content is
-admitted, with per-passage license and attribution recorded), and a separate lexical (BM25)
-indexing step serves it behind the unchanged `KnowledgeBase` contract. Retrieval is lexical
-now; a local-embedding vector index can be added later behind the same contract with no
-re-ingest. Only a tiny seed corpus ships in-tree; ingesting real sources is a later operator
-step. Retrieved passages pass through the same deterministic leak gate as a generated draft,
-so retrieving an answer is not a loophole. See `ARCHITECTURE.md` and `ROADMAP.md`.
+**Assignment access.** A host supplies a short-lived signed token. Operator-managed
+grants specify the class, assignment version and permitted teaching modes and
+stances. Legacy grants allow only `study/peer`. Broader access requires an explicit
+pair on the assignment. See the [authentication contract](docs/authentication.md)
+and [assignment policy](docs/assignment-pedagogy-policy.md).
 
 ## Pointing at a provider
 
-`PROVIDER` selects the provider; the fast/strong tier policy (Planner fast, Reasoner
-strong, Self-Evaluator fast) lives in core and is provider-agnostic. Only the
-tier-to-model mapping is per-provider config.
+The local quickstart uses `local_stub`. For generated replies, configure a
+provider in the installation’s private environment file. The planner and
+self-evaluator use the fast tier, and the reasoner uses the strong tier.
 
-- `openai_compatible` (default, self-hosted first): set `OPENAI_BASE_URL`,
-  `MODEL_FAST`, `MODEL_STRONG`, and `OPENAI_API_KEY`. Sends no reasoning parameter
-  unless `OPENAI_REASONING=1`, so it works with ordinary local models.
-- `anthropic` (hosted convenience): set `ANTHROPIC_API_KEY`; tiers default to
-  `claude-haiku-4-5-20251001` (fast) and `claude-sonnet-4-6` (strong); extended
-  thinking is on by default.
-- `bedrock`: a documented stub, not live. Its Amazon Nova tier mapping is testable but
-  a call raises.
+| Provider | Configuration |
+| --- | --- |
+| `openai_compatible` | Set `OPENAI_BASE_URL`, `MODEL_FAST`, `MODEL_STRONG` and the endpoint credential. A local Ollama or vLLM endpoint can serve this API. |
+| `anthropic` | Install the optional Anthropic SDK and configure `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_FAST` and `ANTHROPIC_MODEL_STRONG`. |
+| `bedrock` | The repository includes tier mappings. Inference through this adapter is unimplemented. |
 
-## Quad sidecar
+A metered installation requires reviewed input and output prices. Models and
+providers in the same deployment share a budget. The operator chooses any short
+and weekly spending windows and their UTC boundaries. A window refresh preserves
+cumulative spending and outstanding reservations. See the [provider setup](deployment/controls/controlled-runtime.md)
+and [budget guide](deployment/controls/budget-policy.md).
 
-A versioned HTTP/JSON sidecar exposes the existing tutor loop to the EduCloud Quad
-control plane at base path `/quad/v1` (`backend/app/integrations/quad/`, mounted on the
-main app). It imports core only, advertises its posture at `/quad/v1/capabilities`
-(pseudonymous identity, grades read-only with no write path, Apache-2.0), runs one
-tutor turn at `/quad/v1/turn`, and rejects PII at the boundary with a 422.
+## Host integration and the Quad sidecar
 
-## Behavioral benchmark
+For API development, start the standalone service from the repository root:
 
-A portable, pack- and provider-parameterized benchmark lives in
-`backend/evals/behavioral/`. Run it from `backend/`:
-
-```bash
-python -m evals.behavioral --pack datascience [--provider P] [--repeats N] \
-    [--judge-provider P] [--temperature 0] [--families a,b,c] [--no-judge] [--out report.json]
+```sh
+docker compose up --build
 ```
 
-`no_solution` and `never_leak` are deterministic gate verdicts (the harness runs
-`pack.leak_evidence` on the emitted text), not LLM rubrics. Qualitative families use a
-separate strong judge configured via `JUDGE_PROVIDER` / `JUDGE_MODEL`; if the judge
-model equals a tutor model under test the report marks those families
-`credible: false` / `self_judged: true`. The deterministic axes are credible today;
-the strong-judge run at higher repeats is pending.
+The API serves [its health endpoint](http://localhost:8000/healthz) on port
+8000 and uses SQLite by default. To use PostgreSQL, point `DATABASE_URL` at the
+Compose database service and start with `docker compose --profile postgres up --build`.
+Protected routes require the host credentials and assignment grants described
+in the [authentication guide](docs/authentication.md). Use the local tutor
+quickstart above when you also need the browser client and managed worker.
 
-## License
+A host can inspect `GET /quad/v1/capabilities` and submit a tutor turn through
+`POST /quad/v1/turn`. Grading results supply read-only context. Belay has no
+grade-writing endpoint. The [reference widget and embedding example](frontend/README.md)
+show how a host presents the tutor while keeping provider credentials on the
+server. Live identity binding, durable revocation, deletion and retention rules,
+and authoritative Portage accounting are tracked in [issue #22](https://github.com/EduCloud-Ecosystem/belay/issues/22).
 
-The framework core and the Quad integration are intended for open-source release and
-are written to be Apache-2.0-compatible, importing only from the framework core. The
-`/quad/v1/capabilities` document advertises `"license": "Apache-2.0"`. Note honestly:
-there is no `LICENSE` file in the repository yet. Adding it is part of the
-name-and-publish step; until then the license is stated intent, not a file in the tree.
+## Adding a domain pack
 
+1. Start from the [skeleton pack](backend/app/packs/_skeleton/). Implement the
+   [domain contract](backend/app/core/domain/pack.py) for curriculum, exercise
+   lookup, execution and grading, worked-example verification, misconceptions
+   and solution-leak evidence.
+2. For a pack with reference material, implement `knowledge()`. The [corpus
+   pipeline](backend/app/knowledge/) preserves attribution during ingestion and
+   builds a searchable index. The [data-science pack](backend/app/packs/datascience/)
+   shows how exercises, grading specs and reference notes fit together.
+3. Register the factory in the [pack registry](backend/app/core/registry.py)
+   and set `TUTOR_PACK` to its ID. The tutor and browser can then use the
+   curriculum exposed by that pack.
 
-Assignment access also restricts tutoring behavior. Legacy grants permit
-`study/peer` only; `teach`, `oracle`, and `control` require explicit trusted
-mode/stance pairs. See [assignment pedagogy policy](docs/assignment-pedagogy-policy.md)
-for the grant format, saved-history upgrade behavior and permission-update rules.
+## Development and evaluation
+
+From the repository root, install the test dependencies in your active backend
+environment and run the Python and browser-client tests:
+
+```sh
+python -m pip install -r backend/requirements-dev.txt
+python -m pytest backend/tests/test_domain_seam.py backend/tests/test_governance.py
+npm ci --prefix frontend --ignore-scripts
+npm test --prefix frontend
+```
+
+The Python command exercises the domain-pack interface and the tutor’s final
+feedback checks. The [validation guide](VALIDATION.md)
+and [CI workflow](.github/workflows/ci.yml) cover the full backend suite,
+SQLite and PostgreSQL, real-container execution, linting and type checking.
+
+### Behavioral benchmark
+
+To evaluate a configured tutor model, run this from `backend/`. It makes tutor
+model calls and writes a JSON report:
+
+```sh
+python -m evals.behavioral --pack datascience --families no_solution,never_leak --no-judge --out report.json
+```
+
+These two families check the emitted answers for solution leaks using the pack’s
+evidence. Other families can use a separately configured judge model to assess
+the quality of the tutor’s help. Run `python -m evals.behavioral --help` to see
+the provider, judge and repeat options.
+
+## License and contributions
+
+The [domain contract](backend/app/core/domain/LICENSE) is licensed under
+Apache-2.0. The tutor, runner, reference pack and integrations are licensed under
+[AGPL-3.0-only](LICENSE). See [Licensing](LICENSING.md) for corpus terms and the
+[contributor guide](CONTRIBUTING.md) for the development workflow and sign-off.

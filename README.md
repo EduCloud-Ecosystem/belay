@@ -4,6 +4,14 @@
 
 <h1 align="center">Belay</h1>
 
+
+<!-- educloud-status-badges:start -->
+[![License](https://img.shields.io/github/license/EduCloud-Ecosystem/belay)](https://github.com/EduCloud-Ecosystem/belay/blob/main/LICENSING.md)
+[![CI and tests](https://github.com/EduCloud-Ecosystem/belay/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EduCloud-Ecosystem/belay/actions/workflows/ci.yml)
+[![Open issues](https://img.shields.io/github/issues/EduCloud-Ecosystem/belay)](https://github.com/EduCloud-Ecosystem/belay/issues)
+[![Contributing](https://img.shields.io/badge/contributions-guide-blue)](https://github.com/EduCloud-Ecosystem/belay/blob/main/CONTRIBUTING.md)
+<!-- educloud-status-badges:end -->
+
 <p align="center"><strong>An AI peer tutor that helps learners think, while a deterministic governance gate guards against revealing solutions.</strong></p>
 
 <p align="center">
